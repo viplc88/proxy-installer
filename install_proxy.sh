@@ -1,5 +1,92 @@
 #!/bin/bash
 
+# ==========================
+# SPEED TEST VPS PORT
+# ==========================
+
+echo ""
+echo "======================================"
+echo " Testing VPS Network Speed"
+echo "======================================"
+
+install_speedtest(){
+
+if command -v speedtest >/dev/null 2>&1; then
+    return
+fi
+
+
+case $ID in
+
+ubuntu|debian)
+
+apt update
+apt install -y curl wget python3-pip
+
+;;
+
+almalinux|rocky|centos|rhel)
+
+dnf install -y curl wget python3-pip
+
+;;
+
+esac
+
+
+pip3 install speedtest-cli
+
+}
+
+
+install_speedtest
+
+
+echo ""
+echo "Running Speedtest..."
+echo "Please wait..."
+
+speedtest \
+--secure \
+--simple \
+> /root/speedtest_result.txt
+
+
+
+DOWNLOAD=$(grep Download /root/speedtest_result.txt | awk '{print $2}')
+
+UPLOAD=$(grep Upload /root/speedtest_result.txt | awk '{print $2}')
+
+PING=$(grep Ping /root/speedtest_result.txt | awk '{print $2}')
+
+
+DOWNLOAD_GBPS=$(awk "BEGIN {printf \"%.2f\",$DOWNLOAD/1000}")
+
+UPLOAD_GBPS=$(awk "BEGIN {printf \"%.2f\",$UPLOAD/1000}")
+
+
+echo ""
+echo "======================================"
+echo " VPS NETWORK RESULT"
+echo "======================================"
+
+echo "Ping:"
+echo "${PING} ms"
+
+echo ""
+
+echo "Download:"
+echo "${DOWNLOAD} Mbps (${DOWNLOAD_GBPS} Gbps)"
+
+echo ""
+
+echo "Upload:"
+echo "${UPLOAD} Mbps (${UPLOAD_GBPS} Gbps)"
+
+echo "======================================"
+
+echo ""
+
 # ======================================================
 # Squid Proxy Auto Installer
 # Ubuntu / Debian / AlmaLinux / Rocky / CentOS
