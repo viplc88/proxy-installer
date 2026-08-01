@@ -256,7 +256,17 @@ echo ""
 
 if command -v ethtool >/dev/null; then
 
-ethtool $NIC 2>/dev/null | grep Speed || true
+NIC_SPEED=$(ethtool $NIC 2>/dev/null | grep Speed | awk '{print $2}')
+
+if [ "$NIC_SPEED" = "Unknown!" ] || [ -z "$NIC_SPEED" ]; then
+
+echo "NIC Speed: Virtual Interface (Provider does not expose limit)"
+
+else
+
+echo "NIC Speed: $NIC_SPEED"
+
+fi
 
 fi
 
