@@ -525,7 +525,24 @@ systemctl restart squid
 
 
 
-SERVER_IP=$(curl -4 -s ifconfig.me)
+# ==========================
+# GET PUBLIC IP
+# ==========================
+
+SERVER_IP=$(curl -4 -s https://api.ipify.org)
+
+if [[ ! $SERVER_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+
+    SERVER_IP=$(curl -4 -s https://ipv4.icanhazip.com)
+
+fi
+
+
+if [[ ! $SERVER_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+
+fi
 
 
 
