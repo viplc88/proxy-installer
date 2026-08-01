@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # ======================================================
-# Universal Linux Squid Proxy Installer
-# Ubuntu Debian Alma Rocky CentOS RHEL Fedora Arch
-# SSH Port + Squid + User Password + Speed Test
+# Universal Squid Proxy Installer v3
+# Ookla Speedtest + NIC Speed + Squid + SSH
+#
+# Support:
+# Ubuntu Debian Alma Rocky CentOS RHEL Fedora
+# Amazon Linux Oracle Linux
 # ======================================================
 
 
@@ -14,15 +17,15 @@ clear
 
 
 echo "======================================"
-echo " Universal Squid Proxy Installer"
+echo " Squid Proxy Installer v3"
+echo " Network Benchmark Enabled"
 echo "======================================"
 
 
-# ROOT CHECK
 
 if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root"
-    exit 1
+echo "Run as root"
+exit 1
 fi
 
 
@@ -34,59 +37,48 @@ fi
 
 if [ -f /etc/os-release ]; then
 
-    source /etc/os-release
-    OS=$ID
+source /etc/os-release
+OS=$ID
 
 else
 
-    OS=$(uname -s)
+echo "Unknown OS"
+exit 1
 
 fi
 
 
-echo "OS detected: $OS"
+echo "OS: $OS"
 
 
 
 # ==========================
-# Detect Package Manager
+# Package Manager
 # ==========================
 
 
-if command -v apt >/dev/null 2>&1; then
+if command -v apt >/dev/null; then
 
-    PKG="apt"
+PKG="apt"
 
+elif command -v dnf >/dev/null; then
 
-elif command -v dnf >/dev/null 2>&1; then
+PKG="dnf"
 
-    PKG="dnf"
+elif command -v yum >/dev/null; then
 
-
-elif command -v yum >/dev/null 2>&1; then
-
-    PKG="yum"
-
-
-elif command -v pacman >/dev/null 2>&1; then
-
-    PKG="pacman"
-
-
-elif command -v zypper >/dev/null 2>&1; then
-
-    PKG="zypper"
-
+PKG="yum"
 
 else
 
-    echo "Unsupported Linux"
-    exit 1
+echo "Unsupported package manager"
+exit 1
 
 fi
 
 
-echo "Package manager: $PKG"
+echo "Package: $PKG"
+
 
 
 
@@ -101,8 +93,8 @@ read -p "SSH Port [2222]: " SSH_PORT
 SSH_PORT=${SSH_PORT:-2222}
 
 
-read -p "Proxy Port [3128]: " SQUID_PORT
-SQUID_PORT=${SQUID_PORT:-3128}
+read -p "Proxy Port [3128]: " PROXY_PORT
+PROXY_PORT=${PROXY_PORT:-3128}
 
 
 read -p "Proxy Username: " PROXY_USER
@@ -115,13 +107,12 @@ echo ""
 
 
 
-
 # ==========================
-# Install Packages
+# Install Base Package
 # ==========================
 
 
-install_packages(){
+install_base(){
 
 
 case $PKG in
@@ -129,100 +120,47 @@ case $PKG in
 
 apt)
 
-
 apt update
-
 
 apt install -y \
 curl \
 wget \
-python3 \
-python3-pip \
+gnupg \
+ca-certificates \
+ethtool \
 squid \
 apache2-utils \
-ufw \
-ethtool
+ufw
 
 
 ;;
-
 
 
 dnf)
 
-
 dnf install -y \
 curl \
 wget \
-python3 \
-python3-pip \
+ca-certificates \
+ethtool \
 squid \
 httpd-tools \
-firewalld \
-ethtool
-
-
-systemctl enable firewalld
-systemctl start firewalld
+firewalld
 
 
 ;;
-
 
 
 yum)
 
-
 yum install -y \
 curl \
 wget \
-python3 \
-python3-pip \
+ca-certificates \
+ethtool \
 squid \
 httpd-tools \
-firewalld \
-ethtool
-
-
-systemctl enable firewalld
-systemctl start firewalld
-
-
-;;
-
-
-
-pacman)
-
-
-pacman -Sy --noconfirm \
-curl \
-wget \
-python \
-python-pip \
-squid \
-apache \
-ethtool
-
-
-;;
-
-
-
-zypper)
-
-
-zypper refresh
-
-
-zypper install -y \
-curl \
-wget \
-python3 \
-python3-pip \
-squid \
-apache2-utils \
-ethtool
+firewalld
 
 
 ;;
@@ -235,59 +173,85 @@ esac
 
 
 
-install_packages
-
+install_base
 
 
 
 
 # ==========================
-# SPEED TEST
+# Install Ookla Speedtest
+# ==========================
+
+
+install_speedtest(){
+
+
+echo ""
+echo "Installing Ookla Speedtest..."
+
+
+case $PKG in
+
+
+apt)
+
+
+curl -s \
+https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.deb.sh \
+| bash
+
+
+apt install -y speedtest
+
+
+;;
+
+
+dnf|yum)
+
+
+curl -s \
+https://packagecloud.io/install/repositories/ookla/speedtest-cli/script.rpm.sh \
+| bash
+
+
+$PKG install -y speedtest
+
+
+;;
+
+
+esac
+
+
+}
+
+
+
+install_speedtest
+
+
+
+# ==========================
+# Network Test
 # ==========================
 
 
 echo ""
 
 echo "======================================"
-echo " VPS SPEED TEST"
-echo "======================================"
-
-
-python3 -m pip install speedtest-cli --break-system-packages 2>/dev/null || \
-python3 -m pip install speedtest-cli
-
-
-
-speedtest \
---secure \
---simple \
->/root/speedtest_result.txt || true
-
-
-
-if [ -f /root/speedtest_result.txt ]; then
-
-
-cat /root/speedtest_result.txt
-
-
-fi
-
-
-
-# ==========================
-# NIC SPEED
-# ==========================
-
-
-echo ""
-
-echo "======================================"
-echo " NETWORK PORT SPEED"
+echo " NETWORK TEST"
 echo "======================================"
 
 
 NIC=$(ip route | grep default | awk '{print $5}')
+
+
+echo "Interface:"
+echo "$NIC"
+
+
+echo ""
 
 
 if command -v ethtool >/dev/null; then
@@ -298,68 +262,86 @@ fi
 
 
 
+echo ""
 
 
+SERVER_IP=$(curl -4 -s https://api.ipify.org)
+
+
+if [[ ! $SERVER_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+
+SERVER_IP=$(hostname -I | awk '{print $1}')
+
+fi
+
+
+
+echo "Public IP:"
+echo "$SERVER_IP"
+
+
+
+echo ""
+
+echo "Running Speedtest..."
+echo "Please wait..."
+
+
+
+speedtest \
+--accept-license \
+--accept-gdpr \
+> /root/speedtest_result.txt || true
+
+
+
+cat /root/speedtest_result.txt
+
+
+echo ""
 
 # ==========================
-# Change SSH Port
+# CHANGE SSH PORT
 # ==========================
 
 
 echo ""
 
-echo "Changing SSH Port..."
-
+echo "Changing SSH port..."
 
 cp /etc/ssh/sshd_config \
 /etc/ssh/sshd_config.backup
 
 
+sed -i "s/^#Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 
-sed -i "/^#Port /c\Port $SSH_PORT" /etc/ssh/sshd_config
-
-
-sed -i "/^Port /c\Port $SSH_PORT" /etc/ssh/sshd_config
+sed -i "s/^Port .*/Port $SSH_PORT/" /etc/ssh/sshd_config
 
 
 
-# SELINUX
+# SELINUX SSH PORT
 
-
-if command -v getenforce >/dev/null 2>&1; then
-
-
-if [ "$(getenforce)" != "Disabled" ]; then
-
-
-if command -v semanage >/dev/null; then
-
+if command -v semanage >/dev/null 2>&1; then
 
 semanage port -a \
 -t ssh_port_t \
 -p tcp \
-$SSH_PORT || true
-
-
-fi
-
-
-fi
-
+$SSH_PORT 2>/dev/null || true
 
 fi
 
 
 
 
-# Firewall SSH
+# ==========================
+# FIREWALL SSH
+# ==========================
 
 
-if command -v ufw >/dev/null; then
+if command -v ufw >/dev/null 2>&1; then
 
 
 ufw allow $SSH_PORT/tcp
-
 
 ufw --force enable
 
@@ -368,7 +350,12 @@ fi
 
 
 
-if command -v firewall-cmd >/dev/null; then
+if command -v firewall-cmd >/dev/null 2>&1; then
+
+
+systemctl enable firewalld
+
+systemctl start firewalld
 
 
 firewall-cmd \
@@ -391,9 +378,8 @@ systemctl restart ssh 2>/dev/null || true
 
 
 
-
 # ==========================
-# Configure Squid
+# SQUID CONFIGURATION
 # ==========================
 
 
@@ -403,12 +389,13 @@ echo "Configuring Squid..."
 
 
 
-AUTH_HELPER=$(find /usr -name basic_ncsa_auth 2>/dev/null | head -1)
+SQUID_AUTH=$(find /usr -name basic_ncsa_auth 2>/dev/null | head -1)
 
 
-if [ -z "$AUTH_HELPER" ]; then
 
-echo "Squid auth helper not found"
+if [ -z "$SQUID_AUTH" ]; then
+
+echo "Cannot find squid authentication helper"
 
 exit 1
 
@@ -430,8 +417,13 @@ htpasswd -bc \
 
 
 
+if [ -f /etc/squid/squid.conf ]; then
+
 cp /etc/squid/squid.conf \
-/etc/squid/squid.conf.backup 2>/dev/null || true
+/etc/squid/squid.conf.backup
+
+fi
+
 
 
 
@@ -439,17 +431,20 @@ cp /etc/squid/squid.conf \
 cat > /etc/squid/squid.conf <<EOF
 
 
-http_port $SQUID_PORT
+# Squid Proxy v3
+
+
+http_port $PROXY_PORT
 
 
 
-auth_param basic program $AUTH_HELPER /etc/squid/passwd/squid_passwd
+auth_param basic program $SQUID_AUTH /etc/squid/passwd/squid_passwd
 
-auth_param basic children 5
+auth_param basic children 10
 
 auth_param basic realm Squid Proxy
 
-auth_param basic credentialsttl 2 hours
+auth_param basic credentialsttl 4 hours
 
 
 
@@ -465,6 +460,8 @@ http_access deny all
 
 forwarded_for delete
 
+request_header_access X-Forwarded-For deny all
+
 via off
 
 
@@ -475,25 +472,28 @@ EOF
 
 
 
-# Firewall Proxy
+# ==========================
+# FIREWALL PROXY PORT
+# ==========================
 
 
-if command -v ufw >/dev/null; then
+
+if command -v ufw >/dev/null 2>&1; then
 
 
-ufw allow $SQUID_PORT/tcp
+ufw allow $PROXY_PORT/tcp
 
 
 fi
 
 
 
-if command -v firewall-cmd >/dev/null; then
+if command -v firewall-cmd >/dev/null 2>&1; then
 
 
 firewall-cmd \
 --permanent \
---add-port=$SQUID_PORT/tcp
+--add-port=$PROXY_PORT/tcp
 
 
 firewall-cmd --reload
@@ -505,8 +505,15 @@ fi
 
 
 
+# ==========================
+# START SQUID
+# ==========================
 
-# Start Squid
+
+
+echo ""
+
+echo "Starting Squid..."
 
 
 systemctl enable squid
@@ -518,31 +525,80 @@ systemctl restart squid
 
 
 
-
 # ==========================
-# Result
-# ==========================
-
-
-
-# ==========================
-# GET PUBLIC IP
+# CHECK SQUID
 # ==========================
 
-SERVER_IP=$(curl -4 -s https://api.ipify.org)
 
-if [[ ! $SERVER_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if systemctl is-active --quiet squid; then
 
-    SERVER_IP=$(curl -4 -s https://ipv4.icanhazip.com)
+SQUID_STATUS="RUNNING"
+
+else
+
+SQUID_STATUS="FAILED"
 
 fi
 
 
-if [[ ! $SERVER_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 
-    SERVER_IP=$(hostname -I | awk '{print $1}')
 
-fi
+
+# ==========================
+# SAVE INFORMATION
+# ==========================
+
+
+
+cat > /root/proxy_info.txt <<EOF
+
+
+==================================
+SQUID PROXY INFORMATION
+==================================
+
+
+IP:
+$SERVER_IP
+
+
+SSH:
+$SERVER_IP:$SSH_PORT
+
+
+PROXY:
+$SERVER_IP:$PROXY_PORT
+
+
+USERNAME:
+$PROXY_USER
+
+
+PASSWORD:
+$PROXY_PASS
+
+
+FORMAT:
+
+$SERVER_IP:$PROXY_PORT:$PROXY_USER:$PROXY_PASS
+
+
+SQUID STATUS:
+
+$SQUID_STATUS
+
+
+==================================
+
+EOF
+
+
+
+
+
+# ==========================
+# FINAL RESULT
+# ==========================
 
 
 
@@ -550,57 +606,22 @@ clear
 
 
 echo "======================================"
+
 echo " INSTALL COMPLETE"
+
 echo "======================================"
 
 
-
 echo ""
 
-echo "Server IP:"
-echo $SERVER_IP
-
-
-
-echo ""
-
-echo "SSH:"
-echo "$SERVER_IP:$SSH_PORT"
+cat /root/proxy_info.txt
 
 
 
 echo ""
 
-echo "Proxy:"
-echo "$SERVER_IP:$SQUID_PORT"
+echo "Network Test:"
 
-
-
-echo ""
-
-echo "Username:"
-echo "$PROXY_USER"
-
-
-
-echo ""
-
-echo "Password:"
-echo "$PROXY_PASS"
-
-
-
-echo ""
-
-echo "Proxy Format:"
-
-echo "$SERVER_IP:$SQUID_PORT:$PROXY_USER:$PROXY_PASS"
-
-
-
-echo ""
-
-echo "Speed Result:"
 cat /root/speedtest_result.txt 2>/dev/null || true
 
 
@@ -608,5 +629,7 @@ cat /root/speedtest_result.txt 2>/dev/null || true
 echo ""
 
 echo "======================================"
+
 echo " DONE"
+
 echo "======================================"
