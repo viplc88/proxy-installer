@@ -90,35 +90,47 @@ echo ""
 echo "  [1] Squid Proxy (bao gom SSH port + Firewall)"
 echo "  [2] Ookla Speedtest"
 echo "  [3] Fail2ban (bao ve SSH + Squid)"
-echo "  [4] Tat ca"
+echo "  [4] Tar, Gzip, Zip, Nano (tien ich co ban)"
+echo "  [5] Xem va restart Tuong lua (Firewall)"
+echo "  [6] Tat ca"
 echo ""
 
-read -p "Nhap so thu tu (vi du: 1 2 3 hoac 4 de cai tat ca): " SERVICE_CHOICE
+read -p "Nhap so thu tu (vi du: 1 3 4 hoac 6 de cai tat ca): " SERVICE_CHOICE
 echo ""
 
 INSTALL_SQUID=false
 INSTALL_SPEEDTEST=false
 INSTALL_FAIL2BAN=false
+INSTALL_UTILS=false
+INSTALL_FIREWALL_CHECK=false
 
-if echo "$SERVICE_CHOICE" | grep -qw "4"; then
+if echo "$SERVICE_CHOICE" | grep -qw "6"; then
     INSTALL_SQUID=true
     INSTALL_SPEEDTEST=true
     INSTALL_FAIL2BAN=true
+    INSTALL_UTILS=true
+    INSTALL_FIREWALL_CHECK=true
 else
-    echo "$SERVICE_CHOICE" | grep -qw "1" && INSTALL_SQUID=true || true
-    echo "$SERVICE_CHOICE" | grep -qw "2" && INSTALL_SPEEDTEST=true || true
-    echo "$SERVICE_CHOICE" | grep -qw "3" && INSTALL_FAIL2BAN=true || true
+    echo "$SERVICE_CHOICE" | grep -qw "1" && INSTALL_SQUID=true          || true
+    echo "$SERVICE_CHOICE" | grep -qw "2" && INSTALL_SPEEDTEST=true       || true
+    echo "$SERVICE_CHOICE" | grep -qw "3" && INSTALL_FAIL2BAN=true        || true
+    echo "$SERVICE_CHOICE" | grep -qw "4" && INSTALL_UTILS=true           || true
+    echo "$SERVICE_CHOICE" | grep -qw "5" && INSTALL_FIREWALL_CHECK=true  || true
 fi
 
-if [ "$INSTALL_SQUID" = false ] && [ "$INSTALL_SPEEDTEST" = false ] && [ "$INSTALL_FAIL2BAN" = false ]; then
+if [ "$INSTALL_SQUID" = false ] && [ "$INSTALL_SPEEDTEST" = false ] && \
+   [ "$INSTALL_FAIL2BAN" = false ] && [ "$INSTALL_UTILS" = false ] && \
+   [ "$INSTALL_FIREWALL_CHECK" = false ]; then
     echo "Khong co service nao duoc chon. Thoat."
     exit 0
 fi
 
 echo "Service se duoc cai dat:"
-[ "$INSTALL_SQUID"     = true ] && echo "  - Squid Proxy"
-[ "$INSTALL_SPEEDTEST" = true ] && echo "  - Ookla Speedtest"
-[ "$INSTALL_FAIL2BAN"  = true ] && echo "  - Fail2ban"
+[ "$INSTALL_SQUID"          = true ] && echo "  - Squid Proxy"
+[ "$INSTALL_SPEEDTEST"      = true ] && echo "  - Ookla Speedtest"
+[ "$INSTALL_FAIL2BAN"       = true ] && echo "  - Fail2ban"
+[ "$INSTALL_UTILS"          = true ] && echo "  - Tar / Gzip / Zip / Nano"
+[ "$INSTALL_FIREWALL_CHECK" = true ] && echo "  - Kiem tra & Restart Tuong lua"
 echo ""
 
 
@@ -419,11 +431,116 @@ JAILEOF
 
 
 # ==========================
+# INSTALL TAR / GZIP / ZIP / NANO
+# ==========================
+do_install_utils() {
+    echo ""
+    echo "======================================"
+    echo " [4] Installing Tar, Gzip, Zip, Nano..."
+    echo "======================================"
+
+    case $PKG in
+    apt)
+        export DEBIAN_FRONTEND=noninteractive
+        apt install -y tar gzip zip unzip nano
+        ;;
+    dnf)
+        dnf install -y tar gzip zip unzip nano
+        ;;
+    yum)
+        yum install -y tar gzip zip unzip nano
+        ;;
+    esac
+
+    echo "[4] Tar / Gzip / Zip / Nano: DONE"
+}
+
+
+# ==========================
+# FIREWALL STATUS & RESTART
+# ==========================
+do_firewall_check() {
+    echo ""
+    echo "======================================"
+    echo " [5] Kiem tra & Restart Tuong lua..."
+    echo "======================================"
+
+    FIREWALL_REPORT=""
+
+    # --- UFW ---
+    if command -v ufw >/dev/null 2>&1; then
+        echo ""
+        echo "--- UFW ---"
+        UFW_STATUS=$(ufw status verbose 2>/dev/null || echo "Khong the doc trang thai UFW")
+        echo "$UFW_STATUS"
+        FIREWALL_REPORT="$FIREWALL_REPORT
+--- UFW ---
+$UFW_STATUS"
+
+        echo ""
+        read -p "Restart UFW? (y/n) [n]: " RESTART_UFW
+        RESTART_UFW=${RESTART_UFW:-n}
+        if [[ "$RESTART_UFW" =~ ^[Yy]$ ]]; then
+            ufw disable || true
+            ufw --force enable || true
+            echo "UFW da duoc restart."
+            FIREWALL_REPORT="$FIREWALL_REPORT
+UFW: Restarted"
+        fi
+    fi
+
+    # --- FIREWALLD ---
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        echo ""
+        echo "--- FIREWALLD ---"
+        if systemctl is-active --quiet firewalld; then
+            FWD_STATUS=$(firewall-cmd --list-all 2>/dev/null || echo "Khong the doc trang thai firewalld")
+            echo "$FWD_STATUS"
+            FIREWALL_REPORT="$FIREWALL_REPORT
+
+--- FIREWALLD ---
+$FWD_STATUS"
+
+            echo ""
+            read -p "Restart firewalld? (y/n) [n]: " RESTART_FWD
+            RESTART_FWD=${RESTART_FWD:-n}
+            if [[ "$RESTART_FWD" =~ ^[Yy]$ ]]; then
+                systemctl restart firewalld || true
+                echo "firewalld da duoc restart."
+                FIREWALL_REPORT="$FIREWALL_REPORT
+firewalld: Restarted"
+            fi
+        else
+            echo "firewalld khong chay."
+            read -p "Khoi dong firewalld? (y/n) [n]: " START_FWD
+            START_FWD=${START_FWD:-n}
+            if [[ "$START_FWD" =~ ^[Yy]$ ]]; then
+                systemctl enable firewalld || true
+                systemctl start firewalld  || true
+                echo "firewalld da duoc khoi dong."
+                FIREWALL_REPORT="$FIREWALL_REPORT
+firewalld: Started"
+            fi
+        fi
+    fi
+
+    if [ -z "$(command -v ufw 2>/dev/null)" ] && [ -z "$(command -v firewall-cmd 2>/dev/null)" ]; then
+        echo "Khong phat hien ufw hoac firewalld tren he thong nay."
+        FIREWALL_REPORT="Khong phat hien tuong lua."
+    fi
+
+    echo "[5] Kiem tra Tuong lua: DONE"
+}
+
+
+# ==========================
 # RUN SELECTED SERVICES
 # ==========================
-[ "$INSTALL_SQUID"     = true ] && do_install_squid
-[ "$INSTALL_SPEEDTEST" = true ] && do_install_speedtest
-[ "$INSTALL_FAIL2BAN"  = true ] && do_install_fail2ban
+[ "$INSTALL_SQUID"          = true ] && do_install_squid
+[ "$INSTALL_SPEEDTEST"      = true ] && do_install_speedtest
+[ "$INSTALL_FAIL2BAN"       = true ] && do_install_fail2ban
+[ "$INSTALL_UTILS"          = true ] && do_install_utils
+[ "$INSTALL_FIREWALL_CHECK" = true ] && do_firewall_check
 
 
 # ==========================
@@ -472,6 +589,8 @@ fi
 SQUID_STATUS="N/A"
 PROXY_TEST="N/A"
 FAIL2BAN_STATUS="N/A"
+UTILS_STATUS="N/A"
+[ "$INSTALL_UTILS" = true ] && UTILS_STATUS="INSTALLED"
 
 if [ "$INSTALL_SQUID" = true ]; then
     if systemctl is-active --quiet squid; then
@@ -531,6 +650,22 @@ cat >> /root/proxy_info.txt <<EOF
 --- FAIL2BAN ---
 STATUS:       $FAIL2BAN_STATUS
 CONFIG:       /etc/fail2ban/jail.local
+
+EOF
+fi
+
+if [ "$INSTALL_UTILS" = true ]; then
+cat >> /root/proxy_info.txt <<EOF
+--- UTILITIES ---
+Tar / Gzip / Zip / Unzip / Nano: $UTILS_STATUS
+
+EOF
+fi
+
+if [ "$INSTALL_FIREWALL_CHECK" = true ]; then
+cat >> /root/proxy_info.txt <<EOF
+--- FIREWALL ---
+${FIREWALL_REPORT:-N/A}
 
 EOF
 fi
