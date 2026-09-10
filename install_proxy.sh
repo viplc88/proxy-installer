@@ -94,10 +94,11 @@ echo "  [4] Tar, Gzip, Zip, Nano (basic utilities)"
 echo "  [5] View and restart firewall"
 echo "  [6] WireGuard Proxy + Create user"
 echo "  [7] Open custom port + Restart firewall"
-echo "  [8] Install all"
+echo "  [8] aaPanel Free Edition"
+echo "  [9] Install all"
 echo ""
 
-read -p "Enter options (example: 1 3 4 or 8 for all): " SERVICE_CHOICE
+read -p "Enter options (example: 1 3 4 or 9 for all): " SERVICE_CHOICE
 echo ""
 
 INSTALL_SQUID=false
@@ -107,8 +108,9 @@ INSTALL_UTILS=false
 INSTALL_FIREWALL_CHECK=false
 INSTALL_WIREGUARD=false
 INSTALL_FIREWALL_OPEN_PORT=false
+INSTALL_AAPANEL=false
 
-if echo "$SERVICE_CHOICE" | grep -qw "8"; then
+if echo "$SERVICE_CHOICE" | grep -qw "9"; then
     INSTALL_SQUID=true
     INSTALL_SPEEDTEST=true
     INSTALL_FAIL2BAN=true
@@ -116,6 +118,7 @@ if echo "$SERVICE_CHOICE" | grep -qw "8"; then
     INSTALL_FIREWALL_CHECK=true
     INSTALL_WIREGUARD=true
     INSTALL_FIREWALL_OPEN_PORT=true
+    INSTALL_AAPANEL=true
 else
     echo "$SERVICE_CHOICE" | grep -qw "1" && INSTALL_SQUID=true          || true
     echo "$SERVICE_CHOICE" | grep -qw "2" && INSTALL_SPEEDTEST=true       || true
@@ -124,12 +127,13 @@ else
     echo "$SERVICE_CHOICE" | grep -qw "5" && INSTALL_FIREWALL_CHECK=true  || true
     echo "$SERVICE_CHOICE" | grep -qw "6" && INSTALL_WIREGUARD=true       || true
     echo "$SERVICE_CHOICE" | grep -qw "7" && INSTALL_FIREWALL_OPEN_PORT=true || true
+    echo "$SERVICE_CHOICE" | grep -qw "8" && INSTALL_AAPANEL=true         || true
 fi
 
 if [ "$INSTALL_SQUID" = false ] && [ "$INSTALL_SPEEDTEST" = false ] && \
    [ "$INSTALL_FAIL2BAN" = false ] && [ "$INSTALL_UTILS" = false ] && \
    [ "$INSTALL_FIREWALL_CHECK" = false ] && [ "$INSTALL_WIREGUARD" = false ] && \
-   [ "$INSTALL_FIREWALL_OPEN_PORT" = false ]; then
+   [ "$INSTALL_FIREWALL_OPEN_PORT" = false ] && [ "$INSTALL_AAPANEL" = false ]; then
     echo "No services selected. Exiting."
     exit 0
 fi
@@ -142,6 +146,7 @@ echo "Services selected:"
 [ "$INSTALL_FIREWALL_CHECK" = true ] && echo "  - View and restart firewall"
 [ "$INSTALL_WIREGUARD"      = true ] && echo "  - WireGuard Proxy + Create user"
 [ "$INSTALL_FIREWALL_OPEN_PORT" = true ] && echo "  - Open custom port + Restart firewall"
+[ "$INSTALL_AAPANEL"        = true ] && echo "  - aaPanel Free Edition"
 echo ""
 
 
@@ -164,6 +169,7 @@ WG_CLIENT_FILE=""
 WG_STATUS="N/A"
 FIREWALL_OPEN_PORT=""
 FIREWALL_OPEN_PROTO="tcp"
+AAPANEL_STATUS="N/A"
 
 if [ "$INSTALL_SQUID" = true ]; then
     read -p "SSH Port [2222]: " SSH_PORT
@@ -516,12 +522,42 @@ do_install_utils() {
 
 
 # ==========================
+# INSTALL AAPANEL FREE EDITION
+# ==========================
+do_install_aapanel() {
+    echo ""
+    echo "======================================"
+    echo " [8] Installing aaPanel Free Edition..."
+    echo "======================================"
+
+    local AAPANEL_URL="https://www.aapanel.com/script/install_panel_en.sh"
+    local AAPANEL_SCRIPT="/tmp/install_panel_en.sh"
+
+    if [ -f /usr/bin/curl ]; then
+        curl -ksS "$AAPANEL_URL" -o "$AAPANEL_SCRIPT"
+    else
+        wget --no-check-certificate -O "$AAPANEL_SCRIPT" "$AAPANEL_URL"
+    fi
+
+    bash "$AAPANEL_SCRIPT"
+
+    if command -v bt >/dev/null 2>&1 || [ -d /www/server/panel ]; then
+        AAPANEL_STATUS="INSTALLED"
+    else
+        AAPANEL_STATUS="FAILED"
+    fi
+
+    echo "[8] aaPanel Free Edition: DONE"
+}
+
+
+# ==========================
 # INSTALL WIREGUARD + CREATE USER
 # ==========================
 do_install_wireguard() {
     echo ""
     echo "======================================"
-    echo " [7] Installing WireGuard + Create user..."
+    echo " [6] Installing WireGuard + Create user..."
     echo "======================================"
 
     local WG_DIR="/etc/wireguard"
@@ -648,7 +684,7 @@ EOF
     fi
 
     echo ""
-    echo "[7] WireGuard + Create user: DONE"
+    echo "[6] WireGuard + Create user: DONE"
     echo "Client config: $WG_CLIENT_FILE"
     if command -v qrencode >/dev/null 2>&1; then
         echo ""
@@ -741,7 +777,7 @@ firewalld: Started"
 do_open_port_and_restart_firewall() {
     echo ""
     echo "======================================"
-    echo " [8] Open Port + Restart Firewall..."
+    echo " [7] Open Port + Restart Firewall..."
     echo "======================================"
 
     FIREWALL_REPORT="${FIREWALL_REPORT}
@@ -771,7 +807,7 @@ Requested open port: ${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO}"
     No firewall service detected."
     fi
 
-    echo "[8] Open port + Restart firewall: DONE"
+    echo "[7] Open port + Restart firewall: DONE"
 }
 
 
@@ -785,6 +821,7 @@ Requested open port: ${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO}"
 [ "$INSTALL_FIREWALL_CHECK" = true ] && do_firewall_check
 [ "$INSTALL_WIREGUARD"      = true ] && do_install_wireguard
 [ "$INSTALL_FIREWALL_OPEN_PORT" = true ] && do_open_port_and_restart_firewall
+[ "$INSTALL_AAPANEL"        = true ] && do_install_aapanel
 
 
 # ==========================
@@ -920,6 +957,15 @@ USER:         $WG_CLIENT_NAME
 CLIENT IP:    $WG_CLIENT_IP
 STATUS:       $WG_STATUS
 CLIENT CONF:  $WG_CLIENT_FILE
+
+EOF
+fi
+
+if [ "$INSTALL_AAPANEL" = true ]; then
+cat >> /root/proxy_info.txt <<EOF
+--- AAPANEL ---
+STATUS:       $AAPANEL_STATUS
+SCRIPT URL:   https://www.aapanel.com/script/install_panel_en.sh
 
 EOF
 fi
