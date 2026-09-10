@@ -92,12 +92,12 @@ echo "  [2] Ookla Speedtest"
 echo "  [3] Fail2ban (protect SSH + Squid)"
 echo "  [4] Tar, Gzip, Zip, Nano (basic utilities)"
 echo "  [5] View and restart firewall"
-echo "  [6] Install all"
-echo "  [7] WireGuard Proxy + Create user"
-echo "  [8] Open custom port + Restart firewall"
+echo "  [6] WireGuard Proxy + Create user"
+echo "  [7] Open custom port + Restart firewall"
+echo "  [8] Install all"
 echo ""
 
-read -p "Enter options (example: 1 3 4 or 6 for all): " SERVICE_CHOICE
+read -p "Enter options (example: 1 3 4 or 8 for all): " SERVICE_CHOICE
 echo ""
 
 INSTALL_SQUID=false
@@ -108,7 +108,7 @@ INSTALL_FIREWALL_CHECK=false
 INSTALL_WIREGUARD=false
 INSTALL_FIREWALL_OPEN_PORT=false
 
-if echo "$SERVICE_CHOICE" | grep -qw "6"; then
+if echo "$SERVICE_CHOICE" | grep -qw "8"; then
     INSTALL_SQUID=true
     INSTALL_SPEEDTEST=true
     INSTALL_FAIL2BAN=true
@@ -122,8 +122,8 @@ else
     echo "$SERVICE_CHOICE" | grep -qw "3" && INSTALL_FAIL2BAN=true        || true
     echo "$SERVICE_CHOICE" | grep -qw "4" && INSTALL_UTILS=true           || true
     echo "$SERVICE_CHOICE" | grep -qw "5" && INSTALL_FIREWALL_CHECK=true  || true
-    echo "$SERVICE_CHOICE" | grep -qw "7" && INSTALL_WIREGUARD=true       || true
-    echo "$SERVICE_CHOICE" | grep -qw "8" && INSTALL_FIREWALL_OPEN_PORT=true || true
+    echo "$SERVICE_CHOICE" | grep -qw "6" && INSTALL_WIREGUARD=true       || true
+    echo "$SERVICE_CHOICE" | grep -qw "7" && INSTALL_FIREWALL_OPEN_PORT=true || true
 fi
 
 if [ "$INSTALL_SQUID" = false ] && [ "$INSTALL_SPEEDTEST" = false ] && \
