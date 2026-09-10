@@ -95,10 +95,11 @@ echo "  [5] View and restart firewall"
 echo "  [6] WireGuard Proxy + Create user"
 echo "  [7] Open custom port + Restart firewall"
 echo "  [8] aaPanel Free Edition"
-echo "  [9] Install all"
+echo "  [9] Nginx + PHP"
+echo "  [10] Install all (excluding aaPanel)"
 echo ""
 
-read -p "Enter options (example: 1 3 4 or 9 for all): " SERVICE_CHOICE
+read -p "Enter options (example: 1 3 4 or 10 for all): " SERVICE_CHOICE
 echo ""
 
 INSTALL_SQUID=false
@@ -109,8 +110,9 @@ INSTALL_FIREWALL_CHECK=false
 INSTALL_WIREGUARD=false
 INSTALL_FIREWALL_OPEN_PORT=false
 INSTALL_AAPANEL=false
+INSTALL_NGINX_PHP=false
 
-if echo "$SERVICE_CHOICE" | grep -qw "9"; then
+if echo "$SERVICE_CHOICE" | grep -qw "10"; then
     INSTALL_SQUID=true
     INSTALL_SPEEDTEST=true
     INSTALL_FAIL2BAN=true
@@ -118,7 +120,7 @@ if echo "$SERVICE_CHOICE" | grep -qw "9"; then
     INSTALL_FIREWALL_CHECK=true
     INSTALL_WIREGUARD=true
     INSTALL_FIREWALL_OPEN_PORT=true
-    INSTALL_AAPANEL=true
+    INSTALL_NGINX_PHP=true
 else
     echo "$SERVICE_CHOICE" | grep -qw "1" && INSTALL_SQUID=true          || true
     echo "$SERVICE_CHOICE" | grep -qw "2" && INSTALL_SPEEDTEST=true       || true
@@ -128,12 +130,14 @@ else
     echo "$SERVICE_CHOICE" | grep -qw "6" && INSTALL_WIREGUARD=true       || true
     echo "$SERVICE_CHOICE" | grep -qw "7" && INSTALL_FIREWALL_OPEN_PORT=true || true
     echo "$SERVICE_CHOICE" | grep -qw "8" && INSTALL_AAPANEL=true         || true
+    echo "$SERVICE_CHOICE" | grep -qw "9" && INSTALL_NGINX_PHP=true       || true
 fi
 
 if [ "$INSTALL_SQUID" = false ] && [ "$INSTALL_SPEEDTEST" = false ] && \
    [ "$INSTALL_FAIL2BAN" = false ] && [ "$INSTALL_UTILS" = false ] && \
    [ "$INSTALL_FIREWALL_CHECK" = false ] && [ "$INSTALL_WIREGUARD" = false ] && \
-   [ "$INSTALL_FIREWALL_OPEN_PORT" = false ] && [ "$INSTALL_AAPANEL" = false ]; then
+    [ "$INSTALL_FIREWALL_OPEN_PORT" = false ] && [ "$INSTALL_AAPANEL" = false ] && \
+    [ "$INSTALL_NGINX_PHP" = false ]; then
     echo "No services selected. Exiting."
     exit 0
 fi
@@ -147,6 +151,7 @@ echo "Services selected:"
 [ "$INSTALL_WIREGUARD"      = true ] && echo "  - WireGuard Proxy + Create user"
 [ "$INSTALL_FIREWALL_OPEN_PORT" = true ] && echo "  - Open custom port + Restart firewall"
 [ "$INSTALL_AAPANEL"        = true ] && echo "  - aaPanel Free Edition"
+[ "$INSTALL_NGINX_PHP"      = true ] && echo "  - Nginx + PHP"
 echo ""
 
 
@@ -170,6 +175,7 @@ WG_STATUS="N/A"
 FIREWALL_OPEN_PORT=""
 FIREWALL_OPEN_PROTO="tcp"
 AAPANEL_STATUS="N/A"
+NGINX_PHP_STATUS="N/A"
 
 if [ "$INSTALL_SQUID" = true ]; then
     read -p "SSH Port [2222]: " SSH_PORT
@@ -552,6 +558,57 @@ do_install_aapanel() {
 
 
 # ==========================
+# INSTALL NGINX + PHP
+# ==========================
+do_install_nginx_php() {
+    echo ""
+    echo "======================================"
+    echo " [9] Installing Nginx + PHP..."
+    echo "======================================"
+
+    case $PKG in
+    apt)
+        export DEBIAN_FRONTEND=noninteractive
+        apt install -y nginx php-fpm php-cli php-common php-mysql php-curl php-xml php-mbstring php-zip
+        ;;
+    dnf)
+        dnf install -y nginx php php-fpm php-cli php-common php-mysqlnd php-curl php-xml php-mbstring php-zip
+        ;;
+    yum)
+        yum install -y epel-release || true
+        yum install -y nginx php php-fpm php-cli php-common php-mysqlnd php-curl php-xml php-mbstring php-zip
+        ;;
+    esac
+
+    systemctl enable nginx || true
+    systemctl restart nginx || true
+    systemctl enable php-fpm || true
+    systemctl restart php-fpm || true
+
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow 80/tcp || true
+        ufw allow 443/tcp || true
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        systemctl enable firewalld || true
+        systemctl start firewalld || true
+        firewall-cmd --permanent --add-service=http || true
+        firewall-cmd --permanent --add-service=https || true
+        firewall-cmd --reload || true
+    fi
+
+    if systemctl is-active --quiet nginx && systemctl is-active --quiet php-fpm; then
+        NGINX_PHP_STATUS="RUNNING"
+    else
+        NGINX_PHP_STATUS="FAILED"
+    fi
+
+    echo "[9] Nginx + PHP: DONE"
+}
+
+
+# ==========================
 # INSTALL WIREGUARD + CREATE USER
 # ==========================
 do_install_wireguard() {
@@ -822,6 +879,7 @@ Requested open port: ${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO}"
 [ "$INSTALL_WIREGUARD"      = true ] && do_install_wireguard
 [ "$INSTALL_FIREWALL_OPEN_PORT" = true ] && do_open_port_and_restart_firewall
 [ "$INSTALL_AAPANEL"        = true ] && do_install_aapanel
+[ "$INSTALL_NGINX_PHP"      = true ] && do_install_nginx_php
 
 
 # ==========================
@@ -966,6 +1024,14 @@ cat >> /root/proxy_info.txt <<EOF
 --- AAPANEL ---
 STATUS:       $AAPANEL_STATUS
 SCRIPT URL:   https://www.aapanel.com/script/install_panel_en.sh
+
+EOF
+fi
+
+if [ "$INSTALL_NGINX_PHP" = true ]; then
+cat >> /root/proxy_info.txt <<EOF
+--- NGINX + PHP ---
+STATUS:       $NGINX_PHP_STATUS
 
 EOF
 fi
