@@ -93,6 +93,7 @@ echo "  [3] Fail2ban (bao ve SSH + Squid)"
 echo "  [4] Tar, Gzip, Zip, Nano (tien ich co ban)"
 echo "  [5] Xem va restart Tuong lua (Firewall)"
 echo "  [6] Tat ca"
+echo "  [7] WireGuard Proxy + Tao user"
 echo ""
 
 read -p "Nhap so thu tu (vi du: 1 3 4 hoac 6 de cai tat ca): " SERVICE_CHOICE
@@ -103,6 +104,7 @@ INSTALL_SPEEDTEST=false
 INSTALL_FAIL2BAN=false
 INSTALL_UTILS=false
 INSTALL_FIREWALL_CHECK=false
+INSTALL_WIREGUARD=false
 
 if echo "$SERVICE_CHOICE" | grep -qw "6"; then
     INSTALL_SQUID=true
@@ -110,17 +112,19 @@ if echo "$SERVICE_CHOICE" | grep -qw "6"; then
     INSTALL_FAIL2BAN=true
     INSTALL_UTILS=true
     INSTALL_FIREWALL_CHECK=true
+    INSTALL_WIREGUARD=true
 else
     echo "$SERVICE_CHOICE" | grep -qw "1" && INSTALL_SQUID=true          || true
     echo "$SERVICE_CHOICE" | grep -qw "2" && INSTALL_SPEEDTEST=true       || true
     echo "$SERVICE_CHOICE" | grep -qw "3" && INSTALL_FAIL2BAN=true        || true
     echo "$SERVICE_CHOICE" | grep -qw "4" && INSTALL_UTILS=true           || true
     echo "$SERVICE_CHOICE" | grep -qw "5" && INSTALL_FIREWALL_CHECK=true  || true
+    echo "$SERVICE_CHOICE" | grep -qw "7" && INSTALL_WIREGUARD=true       || true
 fi
 
 if [ "$INSTALL_SQUID" = false ] && [ "$INSTALL_SPEEDTEST" = false ] && \
    [ "$INSTALL_FAIL2BAN" = false ] && [ "$INSTALL_UTILS" = false ] && \
-   [ "$INSTALL_FIREWALL_CHECK" = false ]; then
+   [ "$INSTALL_FIREWALL_CHECK" = false ] && [ "$INSTALL_WIREGUARD" = false ]; then
     echo "Khong co service nao duoc chon. Thoat."
     exit 0
 fi
@@ -131,6 +135,7 @@ echo "Service se duoc cai dat:"
 [ "$INSTALL_FAIL2BAN"       = true ] && echo "  - Fail2ban"
 [ "$INSTALL_UTILS"          = true ] && echo "  - Tar / Gzip / Zip / Nano"
 [ "$INSTALL_FIREWALL_CHECK" = true ] && echo "  - Kiem tra & Restart Tuong lua"
+[ "$INSTALL_WIREGUARD"      = true ] && echo "  - WireGuard Proxy + Tao user"
 echo ""
 
 
@@ -141,6 +146,16 @@ SSH_PORT=22
 PROXY_PORT=3128
 PROXY_USER=""
 PROXY_PASS=""
+WG_PORT=51820
+WG_CLIENT_NAME="wgclient"
+
+WG_INTERFACE="wg0"
+WG_SUBNET="10.66.66.0/24"
+WG_SERVER_ADDRESS="10.66.66.1/24"
+WG_CLIENT_DNS="1.1.1.1"
+WG_CLIENT_IP=""
+WG_CLIENT_FILE=""
+WG_STATUS="N/A"
 
 if [ "$INSTALL_SQUID" = true ]; then
     read -p "SSH Port [2222]: " SSH_PORT
@@ -161,6 +176,24 @@ if [ "$INSTALL_SQUID" = true ]; then
 
     if [ -z "$PROXY_PASS" ]; then
         echo "Password cannot be empty"
+        exit 1
+    fi
+fi
+
+if [ "$INSTALL_WIREGUARD" = true ]; then
+    read -p "WireGuard Port [51820]: " WG_PORT
+    WG_PORT=${WG_PORT:-51820}
+
+    read -p "WireGuard Username [wgclient]: " WG_CLIENT_NAME
+    WG_CLIENT_NAME=${WG_CLIENT_NAME:-wgclient}
+
+    if ! [[ "$WG_PORT" =~ ^[0-9]+$ ]] || [ "$WG_PORT" -lt 1 ] || [ "$WG_PORT" -gt 65535 ]; then
+        echo "WireGuard Port khong hop le"
+        exit 1
+    fi
+
+    if ! [[ "$WG_CLIENT_NAME" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+        echo "WireGuard Username chi duoc dung ky tu a-z A-Z 0-9 . _ -"
         exit 1
     fi
 fi
@@ -457,6 +490,149 @@ do_install_utils() {
 
 
 # ==========================
+# INSTALL WIREGUARD + CREATE USER
+# ==========================
+do_install_wireguard() {
+    echo ""
+    echo "======================================"
+    echo " [7] Installing WireGuard + Tao user..."
+    echo "======================================"
+
+    local WG_DIR="/etc/wireguard"
+    local WG_CONF="$WG_DIR/$WG_INTERFACE.conf"
+    local WG_CLIENT_DIR="$WG_DIR/clients"
+    local WG_SERVER_PRIV="$WG_DIR/server_private.key"
+    local WG_SERVER_PUB="$WG_DIR/server_public.key"
+    local WG_CLIENT_PRIV="$WG_CLIENT_DIR/${WG_CLIENT_NAME}_private.key"
+    local WG_CLIENT_PUB="$WG_CLIENT_DIR/${WG_CLIENT_NAME}_public.key"
+    local WG_ENDPOINT
+    local PUB_NIC
+
+    case $PKG in
+    apt)
+        export DEBIAN_FRONTEND=noninteractive
+        apt install -y wireguard wireguard-tools qrencode
+        ;;
+    dnf)
+        dnf install -y wireguard-tools qrencode || dnf install -y kmod-wireguard wireguard-tools qrencode
+        ;;
+    yum)
+        yum install -y epel-release || true
+        yum install -y wireguard-tools qrencode || yum install -y kmod-wireguard wireguard-tools qrencode
+        ;;
+    esac
+
+    mkdir -p "$WG_DIR" "$WG_CLIENT_DIR"
+    chmod 700 "$WG_DIR" "$WG_CLIENT_DIR"
+
+    echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-wireguard-forward.conf
+    sysctl --system >/dev/null 2>&1 || true
+
+    PUB_NIC=$(ip route | awk '/default/ {print $5; exit}')
+    if [ -z "$PUB_NIC" ]; then
+        echo "Khong tim thay network interface mac dinh"
+        exit 1
+    fi
+
+    WG_ENDPOINT=$(curl -4 -s --max-time 10 https://api.ipify.org || true)
+    if [[ ! "$WG_ENDPOINT" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        WG_ENDPOINT=$(hostname -I | awk '{print $1}')
+    fi
+
+    if [ ! -f "$WG_SERVER_PRIV" ] || [ ! -f "$WG_SERVER_PUB" ]; then
+        umask 077
+        wg genkey | tee "$WG_SERVER_PRIV" | wg pubkey > "$WG_SERVER_PUB"
+    fi
+
+    if [ ! -f "$WG_CLIENT_PRIV" ] || [ ! -f "$WG_CLIENT_PUB" ]; then
+        umask 077
+        wg genkey | tee "$WG_CLIENT_PRIV" | wg pubkey > "$WG_CLIENT_PUB"
+    fi
+
+    local NEXT_IP_OCTET
+    NEXT_IP_OCTET=$(awk '
+        match($0, /AllowedIPs = 10\\.66\\.66\\.([0-9]+)\\/32/, m) { if (m[1] > max) max = m[1] }
+        END { if (max < 2) print 2; else if (max >= 254) print 254; else print max + 1 }
+    ' "$WG_CONF" 2>/dev/null || echo 2)
+    WG_CLIENT_IP="10.66.66.${NEXT_IP_OCTET}/32"
+
+    if [ ! -f "$WG_CONF" ]; then
+        cat > "$WG_CONF" <<EOF
+[Interface]
+Address = $WG_SERVER_ADDRESS
+ListenPort = $WG_PORT
+PrivateKey = $(cat "$WG_SERVER_PRIV")
+SaveConfig = true
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -s $WG_SUBNET -o $PUB_NIC -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -s $WG_SUBNET -o $PUB_NIC -j MASQUERADE
+EOF
+        chmod 600 "$WG_CONF"
+    fi
+
+    if ! grep -q "# CLIENT: $WG_CLIENT_NAME" "$WG_CONF"; then
+        cat >> "$WG_CONF" <<EOF
+
+# CLIENT: $WG_CLIENT_NAME
+[Peer]
+PublicKey = $(cat "$WG_CLIENT_PUB")
+AllowedIPs = $WG_CLIENT_IP
+EOF
+    else
+        WG_CLIENT_IP=$(awk -v name="$WG_CLIENT_NAME" '
+            $0 == "# CLIENT: " name { in_client=1; next }
+            in_client && /^AllowedIPs = / { print $3; exit }
+            in_client && /^# CLIENT: / { in_client=0 }
+        ' "$WG_CONF")
+        [ -z "$WG_CLIENT_IP" ] && WG_CLIENT_IP="10.66.66.2/32"
+    fi
+
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow "$WG_PORT"/udp || true
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        systemctl enable firewalld || true
+        systemctl start firewalld || true
+        firewall-cmd --permanent --add-port="$WG_PORT"/udp || true
+        firewall-cmd --reload || true
+    fi
+
+    systemctl enable wg-quick@"$WG_INTERFACE" || true
+    systemctl restart wg-quick@"$WG_INTERFACE" || true
+
+    WG_CLIENT_FILE="/root/${WG_CLIENT_NAME}.conf"
+    cat > "$WG_CLIENT_FILE" <<EOF
+[Interface]
+PrivateKey = $(cat "$WG_CLIENT_PRIV")
+Address = $WG_CLIENT_IP
+DNS = $WG_CLIENT_DNS
+
+[Peer]
+PublicKey = $(cat "$WG_SERVER_PUB")
+Endpoint = ${WG_ENDPOINT}:${WG_PORT}
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+EOF
+    chmod 600 "$WG_CLIENT_FILE"
+
+    if systemctl is-active --quiet wg-quick@"$WG_INTERFACE"; then
+        WG_STATUS="RUNNING"
+    else
+        WG_STATUS="FAILED"
+    fi
+
+    echo ""
+    echo "[7] WireGuard + Tao user: DONE"
+    echo "Client config: $WG_CLIENT_FILE"
+    if command -v qrencode >/dev/null 2>&1; then
+        echo ""
+        echo "QR Code cho client:"
+        qrencode -t ansiutf8 < "$WG_CLIENT_FILE" || true
+    fi
+}
+
+
+# ==========================
 # FIREWALL STATUS & RESTART
 # ==========================
 do_firewall_check() {
@@ -541,6 +717,7 @@ firewalld: Started"
 [ "$INSTALL_FAIL2BAN"       = true ] && do_install_fail2ban
 [ "$INSTALL_UTILS"          = true ] && do_install_utils
 [ "$INSTALL_FIREWALL_CHECK" = true ] && do_firewall_check
+[ "$INSTALL_WIREGUARD"      = true ] && do_install_wireguard
 
 
 # ==========================
@@ -617,6 +794,10 @@ if [ "$INSTALL_FAIL2BAN" = true ]; then
     fi
 fi
 
+if [ "$INSTALL_WIREGUARD" = true ] && [ -z "$WG_CLIENT_FILE" ]; then
+    WG_CLIENT_FILE="/root/${WG_CLIENT_NAME}.conf"
+fi
+
 
 # ==========================
 # SAVE INFORMATION
@@ -658,6 +839,20 @@ if [ "$INSTALL_UTILS" = true ]; then
 cat >> /root/proxy_info.txt <<EOF
 --- UTILITIES ---
 Tar / Gzip / Zip / Unzip / Nano: $UTILS_STATUS
+
+EOF
+fi
+
+if [ "$INSTALL_WIREGUARD" = true ]; then
+cat >> /root/proxy_info.txt <<EOF
+--- WIREGUARD ---
+INTERFACE:    $WG_INTERFACE
+PORT:         $WG_PORT/udp
+SUBNET:       $WG_SUBNET
+USER:         $WG_CLIENT_NAME
+CLIENT IP:    $WG_CLIENT_IP
+STATUS:       $WG_STATUS
+CLIENT CONF:  $WG_CLIENT_FILE
 
 EOF
 fi
