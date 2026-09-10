@@ -84,19 +84,20 @@ fi
 # ==========================
 echo ""
 echo "======================================"
-echo " Chon service muon cai dat:"
+echo " Select services to install:"
 echo "======================================"
 echo ""
-echo "  [1] Squid Proxy (bao gom SSH port + Firewall)"
+echo "  [1] Squid Proxy (includes SSH port + firewall rules)"
 echo "  [2] Ookla Speedtest"
-echo "  [3] Fail2ban (bao ve SSH + Squid)"
-echo "  [4] Tar, Gzip, Zip, Nano (tien ich co ban)"
-echo "  [5] Xem va restart Tuong lua (Firewall)"
-echo "  [6] Tat ca"
-echo "  [7] WireGuard Proxy + Tao user"
+echo "  [3] Fail2ban (protect SSH + Squid)"
+echo "  [4] Tar, Gzip, Zip, Nano (basic utilities)"
+echo "  [5] View and restart firewall"
+echo "  [6] Install all"
+echo "  [7] WireGuard Proxy + Create user"
+echo "  [8] Open custom port + Restart firewall"
 echo ""
 
-read -p "Nhap so thu tu (vi du: 1 3 4 hoac 6 de cai tat ca): " SERVICE_CHOICE
+read -p "Enter options (example: 1 3 4 or 6 for all): " SERVICE_CHOICE
 echo ""
 
 INSTALL_SQUID=false
@@ -105,6 +106,7 @@ INSTALL_FAIL2BAN=false
 INSTALL_UTILS=false
 INSTALL_FIREWALL_CHECK=false
 INSTALL_WIREGUARD=false
+INSTALL_FIREWALL_OPEN_PORT=false
 
 if echo "$SERVICE_CHOICE" | grep -qw "6"; then
     INSTALL_SQUID=true
@@ -113,6 +115,7 @@ if echo "$SERVICE_CHOICE" | grep -qw "6"; then
     INSTALL_UTILS=true
     INSTALL_FIREWALL_CHECK=true
     INSTALL_WIREGUARD=true
+    INSTALL_FIREWALL_OPEN_PORT=true
 else
     echo "$SERVICE_CHOICE" | grep -qw "1" && INSTALL_SQUID=true          || true
     echo "$SERVICE_CHOICE" | grep -qw "2" && INSTALL_SPEEDTEST=true       || true
@@ -120,22 +123,25 @@ else
     echo "$SERVICE_CHOICE" | grep -qw "4" && INSTALL_UTILS=true           || true
     echo "$SERVICE_CHOICE" | grep -qw "5" && INSTALL_FIREWALL_CHECK=true  || true
     echo "$SERVICE_CHOICE" | grep -qw "7" && INSTALL_WIREGUARD=true       || true
+    echo "$SERVICE_CHOICE" | grep -qw "8" && INSTALL_FIREWALL_OPEN_PORT=true || true
 fi
 
 if [ "$INSTALL_SQUID" = false ] && [ "$INSTALL_SPEEDTEST" = false ] && \
    [ "$INSTALL_FAIL2BAN" = false ] && [ "$INSTALL_UTILS" = false ] && \
-   [ "$INSTALL_FIREWALL_CHECK" = false ] && [ "$INSTALL_WIREGUARD" = false ]; then
-    echo "Khong co service nao duoc chon. Thoat."
+   [ "$INSTALL_FIREWALL_CHECK" = false ] && [ "$INSTALL_WIREGUARD" = false ] && \
+   [ "$INSTALL_FIREWALL_OPEN_PORT" = false ]; then
+    echo "No services selected. Exiting."
     exit 0
 fi
 
-echo "Service se duoc cai dat:"
+echo "Services selected:"
 [ "$INSTALL_SQUID"          = true ] && echo "  - Squid Proxy"
 [ "$INSTALL_SPEEDTEST"      = true ] && echo "  - Ookla Speedtest"
 [ "$INSTALL_FAIL2BAN"       = true ] && echo "  - Fail2ban"
 [ "$INSTALL_UTILS"          = true ] && echo "  - Tar / Gzip / Zip / Nano"
-[ "$INSTALL_FIREWALL_CHECK" = true ] && echo "  - Kiem tra & Restart Tuong lua"
-[ "$INSTALL_WIREGUARD"      = true ] && echo "  - WireGuard Proxy + Tao user"
+[ "$INSTALL_FIREWALL_CHECK" = true ] && echo "  - View and restart firewall"
+[ "$INSTALL_WIREGUARD"      = true ] && echo "  - WireGuard Proxy + Create user"
+[ "$INSTALL_FIREWALL_OPEN_PORT" = true ] && echo "  - Open custom port + Restart firewall"
 echo ""
 
 
@@ -156,6 +162,8 @@ WG_CLIENT_DNS="1.1.1.1"
 WG_CLIENT_IP=""
 WG_CLIENT_FILE=""
 WG_STATUS="N/A"
+FIREWALL_OPEN_PORT=""
+FIREWALL_OPEN_PROTO="tcp"
 
 if [ "$INSTALL_SQUID" = true ]; then
     read -p "SSH Port [2222]: " SSH_PORT
@@ -188,12 +196,30 @@ if [ "$INSTALL_WIREGUARD" = true ]; then
     WG_CLIENT_NAME=${WG_CLIENT_NAME:-wgclient}
 
     if ! [[ "$WG_PORT" =~ ^[0-9]+$ ]] || [ "$WG_PORT" -lt 1 ] || [ "$WG_PORT" -gt 65535 ]; then
-        echo "WireGuard Port khong hop le"
+        echo "Invalid WireGuard port"
         exit 1
     fi
 
     if ! [[ "$WG_CLIENT_NAME" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
-        echo "WireGuard Username chi duoc dung ky tu a-z A-Z 0-9 . _ -"
+        echo "WireGuard username only allows: a-z A-Z 0-9 . _ -"
+        exit 1
+    fi
+fi
+
+if [ "$INSTALL_FIREWALL_OPEN_PORT" = true ]; then
+    read -p "Open which port? [443]: " FIREWALL_OPEN_PORT
+    FIREWALL_OPEN_PORT=${FIREWALL_OPEN_PORT:-443}
+
+    read -p "Protocol tcp/udp [tcp]: " FIREWALL_OPEN_PROTO
+    FIREWALL_OPEN_PROTO=${FIREWALL_OPEN_PROTO:-tcp}
+
+    if ! [[ "$FIREWALL_OPEN_PORT" =~ ^[0-9]+$ ]] || [ "$FIREWALL_OPEN_PORT" -lt 1 ] || [ "$FIREWALL_OPEN_PORT" -gt 65535 ]; then
+        echo "Invalid firewall port"
+        exit 1
+    fi
+
+    if [ "$FIREWALL_OPEN_PROTO" != "tcp" ] && [ "$FIREWALL_OPEN_PROTO" != "udp" ]; then
+        echo "Invalid protocol. Use tcp or udp"
         exit 1
     fi
 fi
@@ -445,12 +471,12 @@ maxretry = 10
 bantime  = 1800
 JAILEOF
 
-    # Override SSH port nếu đã chọn cài Squid (biết SSH_PORT)
+    # Override SSH port if Squid is selected
     if [ "$INSTALL_SQUID" = true ] && [ "$SSH_PORT" != "22" ]; then
         sed -i "s/^port     = ssh/port     = $SSH_PORT/" /etc/fail2ban/jail.local
     fi
 
-    # Override squid port nếu đã chọn cài Squid
+    # Override Squid port if Squid is selected
     if [ "$INSTALL_SQUID" = true ]; then
         sed -i "s/^port     = 3128/port     = $PROXY_PORT/" /etc/fail2ban/jail.local
         sed -i "s/^enabled  = false/enabled  = true/" /etc/fail2ban/jail.local
@@ -495,7 +521,7 @@ do_install_utils() {
 do_install_wireguard() {
     echo ""
     echo "======================================"
-    echo " [7] Installing WireGuard + Tao user..."
+    echo " [7] Installing WireGuard + Create user..."
     echo "======================================"
 
     local WG_DIR="/etc/wireguard"
@@ -530,7 +556,7 @@ do_install_wireguard() {
 
     PUB_NIC=$(ip route | awk '/default/ {print $5; exit}')
     if [ -z "$PUB_NIC" ]; then
-        echo "Khong tim thay network interface mac dinh"
+        echo "Could not detect default network interface"
         exit 1
     fi
 
@@ -622,11 +648,11 @@ EOF
     fi
 
     echo ""
-    echo "[7] WireGuard + Tao user: DONE"
+    echo "[7] WireGuard + Create user: DONE"
     echo "Client config: $WG_CLIENT_FILE"
     if command -v qrencode >/dev/null 2>&1; then
         echo ""
-        echo "QR Code cho client:"
+        echo "Client QR code:"
         qrencode -t ansiutf8 < "$WG_CLIENT_FILE" || true
     fi
 }
@@ -638,7 +664,7 @@ EOF
 do_firewall_check() {
     echo ""
     echo "======================================"
-    echo " [5] Kiem tra & Restart Tuong lua..."
+    echo " [5] View & Restart Firewall..."
     echo "======================================"
 
     FIREWALL_REPORT=""
@@ -647,7 +673,7 @@ do_firewall_check() {
     if command -v ufw >/dev/null 2>&1; then
         echo ""
         echo "--- UFW ---"
-        UFW_STATUS=$(ufw status verbose 2>/dev/null || echo "Khong the doc trang thai UFW")
+        UFW_STATUS=$(ufw status verbose 2>/dev/null || echo "Unable to read UFW status")
         echo "$UFW_STATUS"
         FIREWALL_REPORT="$FIREWALL_REPORT
 --- UFW ---
@@ -659,7 +685,7 @@ $UFW_STATUS"
         if [[ "$RESTART_UFW" =~ ^[Yy]$ ]]; then
             ufw disable || true
             ufw --force enable || true
-            echo "UFW da duoc restart."
+            echo "UFW restarted."
             FIREWALL_REPORT="$FIREWALL_REPORT
 UFW: Restarted"
         fi
@@ -670,7 +696,7 @@ UFW: Restarted"
         echo ""
         echo "--- FIREWALLD ---"
         if systemctl is-active --quiet firewalld; then
-            FWD_STATUS=$(firewall-cmd --list-all 2>/dev/null || echo "Khong the doc trang thai firewalld")
+            FWD_STATUS=$(firewall-cmd --list-all 2>/dev/null || echo "Unable to read firewalld status")
             echo "$FWD_STATUS"
             FIREWALL_REPORT="$FIREWALL_REPORT
 
@@ -682,18 +708,18 @@ $FWD_STATUS"
             RESTART_FWD=${RESTART_FWD:-n}
             if [[ "$RESTART_FWD" =~ ^[Yy]$ ]]; then
                 systemctl restart firewalld || true
-                echo "firewalld da duoc restart."
+                echo "firewalld restarted."
                 FIREWALL_REPORT="$FIREWALL_REPORT
 firewalld: Restarted"
             fi
         else
-            echo "firewalld khong chay."
-            read -p "Khoi dong firewalld? (y/n) [n]: " START_FWD
+            echo "firewalld is not running."
+            read -p "Start firewalld? (y/n) [n]: " START_FWD
             START_FWD=${START_FWD:-n}
             if [[ "$START_FWD" =~ ^[Yy]$ ]]; then
                 systemctl enable firewalld || true
                 systemctl start firewalld  || true
-                echo "firewalld da duoc khoi dong."
+                echo "firewalld started."
                 FIREWALL_REPORT="$FIREWALL_REPORT
 firewalld: Started"
             fi
@@ -701,11 +727,51 @@ firewalld: Started"
     fi
 
     if [ -z "$(command -v ufw 2>/dev/null)" ] && [ -z "$(command -v firewall-cmd 2>/dev/null)" ]; then
-        echo "Khong phat hien ufw hoac firewalld tren he thong nay."
-        FIREWALL_REPORT="Khong phat hien tuong lua."
+        echo "No ufw or firewalld detected on this system."
+        FIREWALL_REPORT="No firewall service detected."
     fi
 
-    echo "[5] Kiem tra Tuong lua: DONE"
+    echo "[5] Firewall check: DONE"
+}
+
+
+# ==========================
+# OPEN PORT + RESTART FIREWALL
+# ==========================
+do_open_port_and_restart_firewall() {
+    echo ""
+    echo "======================================"
+    echo " [8] Open Port + Restart Firewall..."
+    echo "======================================"
+
+    FIREWALL_REPORT="${FIREWALL_REPORT}
+Requested open port: ${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO}"
+
+    if command -v ufw >/dev/null 2>&1; then
+        ufw allow "${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO}" || true
+        ufw disable || true
+        ufw --force enable || true
+        FIREWALL_REPORT="${FIREWALL_REPORT}
+    UFW: Opened ${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO} and restarted"
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        systemctl enable firewalld || true
+        systemctl start firewalld || true
+        firewall-cmd --permanent --add-port="${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO}" || true
+        firewall-cmd --reload || true
+        systemctl restart firewalld || true
+        FIREWALL_REPORT="${FIREWALL_REPORT}
+    firewalld: Opened ${FIREWALL_OPEN_PORT}/${FIREWALL_OPEN_PROTO} and restarted"
+    fi
+
+    if [ -z "$(command -v ufw 2>/dev/null)" ] && [ -z "$(command -v firewall-cmd 2>/dev/null)" ]; then
+        echo "No ufw or firewalld detected on this system."
+        FIREWALL_REPORT="${FIREWALL_REPORT}
+    No firewall service detected."
+    fi
+
+    echo "[8] Open port + Restart firewall: DONE"
 }
 
 
@@ -718,6 +784,7 @@ firewalld: Started"
 [ "$INSTALL_UTILS"          = true ] && do_install_utils
 [ "$INSTALL_FIREWALL_CHECK" = true ] && do_firewall_check
 [ "$INSTALL_WIREGUARD"      = true ] && do_install_wireguard
+[ "$INSTALL_FIREWALL_OPEN_PORT" = true ] && do_open_port_and_restart_firewall
 
 
 # ==========================
@@ -857,7 +924,7 @@ CLIENT CONF:  $WG_CLIENT_FILE
 EOF
 fi
 
-if [ "$INSTALL_FIREWALL_CHECK" = true ]; then
+if [ "$INSTALL_FIREWALL_CHECK" = true ] || [ "$INSTALL_FIREWALL_OPEN_PORT" = true ]; then
 cat >> /root/proxy_info.txt <<EOF
 --- FIREWALL ---
 ${FIREWALL_REPORT:-N/A}
